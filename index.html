@@ -47,7 +47,7 @@ canvas{border:1px solid var(--bd);border-radius:10px;background:#fff;touch-actio
 <button data-a="home">←</button><h1><span id="ttl"></span> <small style="color:var(--mut)">code: <b id="code"></b></small></h1>
 <input id="nm" placeholder="Your name" aria-label="Your name">
 <input id="sr" placeholder="Search…" aria-label="Search">
-<button data-a="vis">🖼 Visuals</button><button data-a="syn">Summary</button><button data-a="csv">CSV</button><button data-a="pdf">PDF</button><button data-a="share">🔗 Link</button><button data-a="org" id="org" hidden>Rearrange</button>
+<button data-a="vis">🖼 Visuals</button><button data-a="syn">Summary</button><button data-a="csv">CSV</button><button data-a="pdf">PDF</button><button data-a="mail" class="p">✉️ Envoyer par mail</button><button data-a="share">🔗 Link</button><button data-a="org" id="org" hidden>Rearrange</button>
 </header>
 <div id="app"></div><div id="md"></div><div id="toast"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -273,13 +273,55 @@ function mkmap(){const J=window.jspdf;if(!J)return null;
   d.setFontSize(11*s*2.835);d.setTextColor(74,80,100);d.text(cl(i.author||"Anonymous"),X(L),Y(tp+10+ls.length*17.5+11));
   if(showVis&&i.img){try{d.addImage(i.img,"JPEG",X(L),Y(n.y+n.h/2-8-80),(n.w-24)*s,80*s)}catch(e){}}});
  return d}
+// ===== File names: "Session - Theme - type.pdf" =====
+const MAIL_TO="mission-appui-pedagogie@univ-lehavre.fr";
+const safe=t=>String(t??"").replace(/[\\/:*?"<>|\u0000-\u001f]/g," ").replace(/\s+/g," ").trim().slice(0,70);
+const baseName=()=>[safe(sess.name),safe(sess.theme)].filter(Boolean).filter((v,i,a)=>a.indexOf(v)==i).join(" - ")||"mind-map";
+const pdfName=k=>baseName()+(k=="m"?" - mind map.pdf":" - liste.pdf");
+const mailSubject=()=>[sess.name,sess.theme].filter(Boolean).filter((v,i,a)=>a.indexOf(v)==i).join(" - ");
 function exportPdf(k){close();
  const d=k=="m"?mkmap():mkpdf();
  if(!d)return toast("PDF module unavailable (check your connection).");
- const blob=d.output("blob"),fn=k=="m"?"mind-map-diagram.pdf":"mind-map-text.pdf";
+ const blob=d.output("blob"),fn=pdfName(k);
  (dl?dl.save({filename:fn,data:blob}):downloads_fallback(blob,fn))
   .then(()=>toast("PDF downloaded"))
   .catch(e=>{if(e&&e.code!="declined")toast("Export failed.")});
+}
+// ===== Send by e-mail =====
+function mailDialog(){
+ if(!sess)return;
+ modal('<h2 style="margin:0">✉️ Envoyer par mail</h2>'+
+ '<p style="margin:0">Destinataire : <b>'+esc(MAIL_TO)+'</b><br>Objet : <b>'+esc(mailSubject())+'</b></p>'+
+ '<p style="margin:0">Les 2 PDF (mind map + liste) seront nommés :<br><small>'+esc(pdfName("m"))+'<br>'+esc(pdfName("t"))+'</small></p>'+
+ '<button class="p" data-a="mailshare">📎 Ouvrir mon application mail avec les 2 PDF en pièces jointes</button>'+
+ '<small style="color:var(--mut)">Recommandé sur iPad, iPhone, Android et Mac/Windows récents : choisissez « Mail » (ou Outlook, Gmail…) dans la fenêtre de partage. Le destinataire est rappelé dans le message ; vérifiez-le avant l’envoi.</small>'+
+ '<button data-a="mailto">✉️ Alternative : télécharger les 2 PDF puis ouvrir un mail pré-rempli</button>'+
+ '<small style="color:var(--mut)">Les PDF sont téléchargés, puis votre application mail s’ouvre avec le destinataire et l’objet déjà remplis : il suffit d’y joindre les 2 fichiers téléchargés.</small>'+
+ '<button onclick="close()">Annuler</button>');
+}
+function mailBody(att){
+ return "Bonjour,\n\nVeuillez trouver ci-joint les résultats de la session « "+(sess.name||"")+" » (thème : "+(sess.theme||"")+").\n"+
+  (att?"":"\n(Merci de joindre les 2 PDF qui viennent d’être téléchargés : mind map et liste.)\n")+"\nCordialement,\n"+(name||"");
+}
+async function mailShare(){
+ const m=mkmap(),t=mkpdf();
+ if(!m||!t){close();return toast("PDF module unavailable (check your connection).")}
+ const files=[new File([m.output("blob")],pdfName("m"),{type:"application/pdf"}),new File([t.output("blob")],pdfName("t"),{type:"application/pdf"})];
+ const data={files,title:mailSubject(),text:"À : "+MAIL_TO+"\nObjet : "+mailSubject()+"\n\n"+mailBody(true)};
+ if(navigator.canShare&&navigator.canShare({files})){
+  try{await navigator.share(data);close();return}
+  catch(e){if(e&&e.name=="AbortError")return}
+ }
+ // Browser cannot attach files: fall back to download + prefilled mail
+ mailTo();
+}
+async function mailTo(){
+ const m=mkmap(),t=mkpdf();
+ if(!m||!t){close();return toast("PDF module unavailable (check your connection).")}
+ const save=(d,k)=>{const b=d.output("blob"),fn=pdfName(k);return dl?dl.save({filename:fn,data:b}):downloads_fallback(b,fn)};
+ try{await save(m,"m");await new Promise(r=>setTimeout(r,500));await save(t,"t")}catch(e){if(e&&e.code!="declined")toast("Export failed.")}
+ close();toast("PDF téléchargés : joignez-les au mail qui s’ouvre.");
+ setTimeout(()=>{location.href="mailto:"+MAIL_TO+"?subject="+encodeURIComponent(mailSubject())+"&body="+encodeURIComponent(mailBody(false))},700);
 }
 // Fallback if the download service is unavailable
 async function downloads_fallback(blob,fn){
@@ -300,6 +342,9 @@ document.addEventListener("click",e=>{
  else if(a=="pdf")modal('<h2 style="margin:0">Download as PDF</h2><button class="p" data-a="pdft">📄 Text version (simple list)</button><button class="p" data-a="pdfm">🗺️ Mind map version (diagram)</button><button onclick="close()">Cancel</button>');
  else if(a=="pdft")exportPdf("t");
  else if(a=="pdfm")exportPdf("m");
+ else if(a=="mail")mailDialog();
+ else if(a=="mailshare")mailShare();
+ else if(a=="mailto")mailTo();
  else if(a=="del"&&i){modal(`<p>Delete this idea?</p><b>${esc(i.text)}</b><div><button class="p" id="ok">Delete</button> <button onclick="close()">Cancel</button></div>`);$("#ok").onclick=async()=>{try{const dsc=x=>[x,...ideas.filter(k=>k.p===x).flatMap(k=>dsc(k.id))];await Promise.all(dsc(id).map(d=>col().doc(d).delete()));close()}catch(e){toast("Denied.")}}}
  else if(a=="pic")picker(id);
  else if(a=="zoom")modal(`<img src="${esc(b.dataset.u)}" alt="" style="max-width:100%;border-radius:10px"><button onclick="close()">Close</button>`);
